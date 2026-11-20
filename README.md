@@ -1,6 +1,6 @@
 # Biblioteca — extensión personal para Chrome
 
-Versión 0.2.0. Guarda enlaces, páginas completas, textos, vídeos, imágenes y capturas en **Biblioteca DB** (Notion), hablando directamente con la API de Notion. Sin Cloudflare, sin servidores intermedios y sin suscripciones. Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md).
+Versión 0.3.0. Guarda enlaces, páginas completas, textos, vídeos, imágenes y capturas en **Biblioteca DB** (Notion), hablando directamente con la API de Notion. Sin Cloudflare, sin servidores intermedios y sin suscripciones. Los cambios de cada versión están en [CHANGELOG.md](CHANGELOG.md).
 
 ## Instalar o actualizar
 
@@ -20,6 +20,9 @@ El secreto se guarda solo en el almacenamiento local de Chrome. No está en el c
 ## Usar
 
 - **Aviso de guardado:** al abrir la extensión, arriba aparece si la página ya está en tu Biblioteca (con enlace y fecha) o si es nueva. Reconoce el mismo enlace aunque cambie `www`, `http/https`, la barra final, un `#ancla` o parámetros de seguimiento (`utm_…`, `fbclid`, `si`, `igsh`…). En YouTube e Instagram se compara por el identificador del vídeo o la publicación.
+- **Actualizar:** si ya está guardada, pulsa «Actualizar este» en el aviso. Se suman etiquetas, proyectos y orígenes, se ponen icono y cabecera, y lo nuevo se añade al final del documento bajo «Actualización · fecha». No se borra nada ni se cambian título, Tipo, Categoría o Estado si ya tenían valor.
+- **Icono y cabecera:** el icono de la web se usa como icono de la página de Notion y su imagen principal como cabecera. La casilla junto a la vista previa permite no usarlos.
+- **Etiquetas:** escribe y pulsa Intro o coma. Las que no existen aparecen como «nueva» y Notion las crea al guardar (la integración necesita permiso para actualizar contenido).
 - **Enlace:** título, URL, clasificación y anotaciones.
 - **Selección:** guarda el texto seleccionado conservando formato (negritas, enlaces, listas…).
 - **Página completa:** guarda el contenido principal de la página con formato de Notion: títulos, párrafos con negrita/cursiva/código/enlaces, listas, citas, bloques de código con lenguaje, tablas, separadores, imágenes (con pie) y vídeos incrustados. Se descartan menús, pies de página, avisos de cookies y botones de compartir. Si editas el texto en el formulario, se guarda como texto sin formato.

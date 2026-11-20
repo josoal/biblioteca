@@ -206,6 +206,21 @@
   const docTitle = (meta("og:title") || document.title || "").trim().toLowerCase();
   if (pageBlocks[0]?.t === "h1" && docTitle.includes(plain(pageBlocks[0].r).trim().toLowerCase())) pageBlocks.shift();
 
+  // Icono de la web: el más grande disponible (apple-touch-icon o icon con tamaño), si no /favicon.ico.
+  function siteIcon() {
+    let best = "", bestSize = -1;
+    for (const l of document.querySelectorAll("link[rel][href]")) {
+      const rel = l.rel.toLowerCase();
+      if (!/(^|\s)(icon|apple-touch-icon|apple-touch-icon-precomposed)(\s|$)/.test(rel) || rel.includes("mask-icon")) continue;
+      const href = abs(l.getAttribute("href"));
+      if (!href || href.length > 1900) continue;
+      const size = Math.max(0, ...String(l.getAttribute("sizes") || "").split(/\s+/).map((x) => parseInt(x) || 0)) || (rel.includes("apple") ? 180 : 16);
+      const score = size + (/\.svg(\?|$)/i.test(href) ? -1 : 0);
+      if (score > bestSize) { best = href; bestSize = score; }
+    }
+    return best || (/^https?:$/.test(location.protocol) ? location.origin + "/favicon.ico" : "");
+  }
+
   return {
     title: document.title || meta("og:title"),
     url: location.href,
@@ -220,7 +235,8 @@
       video: abs(meta("og:video:secure_url", "og:video:url", "og:video", "twitter:player")),
       videoType: meta("og:video:type"),
       type: meta("og:type"),
-      siteName: meta("og:site_name")
+      siteName: meta("og:site_name"),
+      icon: siteIcon()
     }
   };
 })();

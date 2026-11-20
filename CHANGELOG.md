@@ -1,5 +1,14 @@
 # Cambios
 
+## 0.3.0 — 2026-11-20
+
+### Nuevo
+- El icono de la web pasa a ser el icono de la página en Notion (el más grande disponible; si no hay, `/favicon.ico`).
+- La imagen principal de la web (`og:image`) pasa a ser la cabecera de la página en Notion. En Instagram se sube a Notion para que no caduque. Se puede desactivar con la casilla que muestra la vista previa.
+- Etiquetas: editor con fichas. Se escribe y se pulsa Intro o coma; las que no existen se marcan como «nueva» y Notion las crea al guardar.
+- Si la página ya está guardada, el aviso de arriba ofrece «Actualizar este». Al actualizar se añaden las etiquetas, proyectos y orígenes nuevos, se pone el icono y la cabecera, y el contenido nuevo (anotaciones, captura, página o selección) se añade al final bajo «Actualización · fecha». No se borra nada: el título, Tipo, Categoría y Estado existentes se respetan.
+- Si Notion rechaza el icono o la cabecera, el documento se guarda igualmente sin ellos y se avisa.
+
 ## 0.2.0 — 2026-11-20
 
 ### Nuevo

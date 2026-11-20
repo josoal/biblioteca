@@ -1,7 +1,7 @@
 // Pruebas unitarias con API de Notion simulada. Ejecuta: node --test tests.mjs
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {cleanUrl,isYoutube,youtubeId,instagramPost,normalizeId,chunks,makeBlocks,makeProperties,saveClip,FIELD,DEFAULT_SOURCE,duplicateFilter,detectMedia,richText,richBlocks,batches,mediaAsLinks,pickOption} from "./notion.js";
+import {cleanUrl,isYoutube,youtubeId,instagramPost,normalizeId,chunks,makeBlocks,makeProperties,saveClip,FIELD,DEFAULT_SOURCE,duplicateFilter,detectMedia,richText,richBlocks,batches,mediaAsLinks,pickOption,updateClip,mergeProperties,pageLook} from "./notion.js";
 
 const schema = Object.fromEntries([[FIELD.title,"title"],[FIELD.type,"select"],[FIELD.category,"select"],[FIELD.project,"multi_select"],[FIELD.origin,"multi_select"],[FIELD.url,"url"],[FIELD.tags,"multi_select"],[FIELD.status,"status"],[FIELD.files,"files"]].map(([k,type]) => [k,{type}]));
 const specimen = {title:"Ejemplo",url:"https://example.org/test?utm_source=x",type:"Investigación",category:"Tecnología",project:["Ensayos"],origin:["Web"],tags:["prueba","prueba"],status:"Pendiente de revisar",mode:"article",notes:"Nota",content:"Prueba de texto"};
@@ -154,5 +154,55 @@ test("sube la captura (adjunto y dentro de la página) y la imagen de Instagram"
     assert.equal(created.properties[FIELD.files].files[0].file_upload.id, "up1");
     const images = created.children.filter((b) => b.type === "image").map((b) => b.image.file_upload.id);
     assert.deepEqual(images, ["up3", "up2"]);
+  } finally { m.restore(); }
+});
+
+test("pone el icono de la web y la imagen principal como cabecera, con alternativa si Notion los rechaza", async () => {
+  assert.deepEqual(pageLook({icon:"https://a.org/favicon.png", cover:"https://a.org/og.jpg"}), {icon:{type:"external", external:{url:"https://a.org/favicon.png"}}, cover:{type:"external", external:{url:"https://a.org/og.jpg"}}});
+  assert.deepEqual(pageLook({icon:"https://a.org/f.png", useLook:false}), {});
+  assert.deepEqual(pageLook({icon:"javascript:x"}), {});
+  let tries = 0, accepted;
+  const m = mockFetch((url, opts) => {
+    if (url.endsWith("/data_sources/" + DEFAULT_SOURCE)) return {properties:schema};
+    if (url.endsWith("/query")) return {results:[]};
+    if (url.endsWith("/pages")) {
+      const body = JSON.parse(opts.body); tries++;
+      if (body.cover) return new Response(JSON.stringify({message:"cover invalid"}), {status:400});
+      accepted = body; return {id:"p", url:"https://www.notion.so/p"};
+    }
+    throw Error("Llamada inesperada " + url);
+  });
+  try {
+    const r = await saveClip("t", DEFAULT_SOURCE, {...specimen, mode:"link", icon:"https://a.org/f.png", cover:"https://a.org/og.jpg"});
+    assert.equal(tries, 2); assert.equal(accepted.icon, undefined); assert.equal(r.warnings.length, 1);
+  } finally { m.restore(); }
+});
+
+test("crea etiquetas nuevas enviando su nombre a Notion", () => {
+  const p = makeProperties({...specimen, tags:["existente", "Nueva, con coma"]}, schema);
+  assert.deepEqual(p[FIELD.tags].multi_select, [{name:"existente"}, {name:"Nueva  con coma"}]);
+});
+
+test("actualiza un documento existente sin borrar nada", async () => {
+  assert.deepEqual(mergeProperties({[FIELD.tags]:{multi_select:[{name:"b"}]}, [FIELD.files]:{files:[]}, [FIELD.type]:{select:{name:"Enlace"}}, [FIELD.category]:{select:{name:"Música"}}}, {[FIELD.tags]:{multi_select:[{name:"a"}]}, [FIELD.type]:{select:{name:"Investigación"}}, [FIELD.category]:{select:null}}),
+    {[FIELD.tags]:{multi_select:[{name:"a"}, {name:"b"}]}, [FIELD.category]:{select:{name:"Música"}}});
+  let patch, appended = [];
+  const m = mockFetch((url, opts) => {
+    if (url.endsWith("/data_sources/" + DEFAULT_SOURCE)) return {properties:schema};
+    if (url.endsWith("/pages/existing") && opts.method === "GET") return {id:"existing", url:"https://www.notion.so/existing", properties:{[FIELD.tags]:{multi_select:[{name:"vieja"}]}, [FIELD.project]:{multi_select:[{name:"Jarana"}]}}};
+    if (url.endsWith("/pages/existing") && opts.method === "PATCH") { patch = JSON.parse(opts.body); return {id:"existing"}; }
+    if (url.endsWith("/blocks/existing/children")) { appended.push(...JSON.parse(opts.body).children); return {results:[]}; }
+    throw Error("Llamada inesperada " + opts.method + " " + url);
+  });
+  try {
+    const r = await updateClip("t", DEFAULT_SOURCE, "existing", {...specimen, icon:"https://a.org/f.png", cover:"https://a.org/og.jpg", pageBlocks:[{t:"p", r:[{text:"Nuevo"}]}]});
+    assert.equal(r.updated, true); assert.equal(r.page.url, "https://www.notion.so/existing");
+    assert.deepEqual(patch.properties[FIELD.tags].multi_select.map((x) => x.name), ["vieja", "prueba"]);
+    assert.deepEqual(patch.properties[FIELD.project].multi_select.map((x) => x.name), ["Jarana", "Ensayos"]);
+    assert.equal(patch.icon.external.url, "https://a.org/f.png"); assert.equal(patch.cover.external.url, "https://a.org/og.jpg");
+    assert.equal(appended[0].type, "divider");
+    assert.match(appended[1].heading_2.rich_text[0].text.content, /^Actualización · /);
+    assert.ok(!appended.some((b) => b.type === "paragraph" && b.paragraph.rich_text[0].text.content === "Fuente original: "));
+    assert.equal(appended.at(-1).paragraph.rich_text[0].text.content, "Nuevo");
   } finally { m.restore(); }
 });

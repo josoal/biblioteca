@@ -270,6 +270,7 @@ export async function api(token, path, method = "GET", body, tries = 4) {
       continue;
     }
     const hints = {401:"Clave de Notion incorrecta o revocada.", 403:"La integración no tiene permisos suficientes.", 404:"Notion no encuentra la base de datos. Comprueba que la integración está conectada a «Biblioteca DB».", 429:"Notion ha limitado temporalmente las solicitudes. Espera un momento y vuelve a intentarlo."};
+    if (response.status === 400 && /option|select/i.test(result.message || "")) hints[400] = "Notion no ha podido crear una opción nueva (etiqueta, proyecto…). Comprueba que la integración tiene permiso para actualizar contenido.";
     const err = Error((hints[response.status] || "Error de Notion (" + response.status + ").") + " " + (result.message || ""));
     err.status = response.status;
     throw err;
@@ -337,45 +338,110 @@ async function appendAll(token, pageId, blocks, onProgress) {
   }
 }
 
-export async function saveClip(token, id, data, onProgress) {
-  id = normalizeId(id);
-  if (!data.title?.trim()) throw Error("El título es obligatorio.");
-  data.url = cleanUrl(data.url);
-  if (data.url.length > 2000) throw Error("El enlace supera el máximo de Notion.");
-  onProgress?.("Comprobando la base de datos…");
-  const schema = await getSchema(token, id);
-  if (!data.allowDuplicate) { const dup = await checkDuplicate(token, id, data.url); if (dup.length) return {duplicate:dup}; }
+// Icono y cabecera de la página de Notion.
+export function pageLook(data, uploads = {}) {
+  const look = {};
+  if (data.useLook === false) return look;
+  if (data.icon && isWebUrl(data.icon) && data.icon.length <= 1900) look.icon = {type:"external", external:{url:data.icon}};
+  if (uploads.cover) look.cover = {type:"file_upload", file_upload:{id:uploads.cover}};
+  else if (data.cover && isWebUrl(data.cover) && data.cover.length <= 1900) look.cover = {type:"external", external:{url:data.cover}};
+  return look;
+}
 
+// Prepara subidas (captura, imagen de Instagram, cabecera) comunes a crear y actualizar.
+async function prepareUploads(token, data, onProgress, {screenshotAsFile = true} = {}) {
   const uploads = {}, warnings = [];
   if (data.screenshot) {
     onProgress?.("Subiendo la captura…");
-    // Se sube dos veces: una para «Archivos adjuntos» y otra para verla dentro de la página.
-    uploads.screenshotFile = await uploadFile(token, dataUrlToBlob(data.screenshot), "Captura.jpg");
+    // Una subida para «Archivos adjuntos» y otra para verla dentro de la página.
+    if (screenshotAsFile) uploads.screenshotFile = await uploadFile(token, dataUrlToBlob(data.screenshot), "Captura.jpg");
     try { uploads.screenshotBlock = await uploadFile(token, dataUrlToBlob(data.screenshot), "Captura.jpg"); }
-    catch { warnings.push("La captura está en Archivos adjuntos, pero no dentro de la página."); }
+    catch { warnings.push("La captura no se ha podido mostrar dentro de la página."); }
   }
   if (data.media?.kind === "instagram" && data.media.image) {
     onProgress?.("Guardando la imagen de Instagram…");
     try {
       const blob = await fetchImage(data.media.image);
-      const ext = blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1];
-      uploads.mediaImage = await uploadFile(token, blob, "Instagram." + ext);
+      const name = "Instagram." + (blob.type === "image/jpeg" ? "jpg" : blob.type.split("/")[1]);
+      uploads.mediaImage = await uploadFile(token, blob, name);
+      // Los enlaces de Instagram caducan: la cabecera también se sube a Notion.
+      if (data.useLook !== false && data.cover === data.media.image) uploads.cover = await uploadFile(token, blob, name).catch(() => null);
     } catch (e) { warnings.push("La imagen de Instagram se ha enlazado, no copiado (" + e.message + "). Ese enlace puede caducar."); }
   }
+  return {uploads, warnings};
+}
 
+// Intenta la petición completa y, si Notion rechaza algún medio (400), reintenta sin icono/cabecera
+// y después con imágenes y vídeos convertidos en enlaces.
+async function withFallbacks(attempt, look, blocks, warnings) {
+  const plans = [[look, blocks, ""], [{}, blocks, "Notion no aceptó el icono o la cabecera de la web; se ha guardado sin ellos."], [{}, mediaAsLinks(blocks), "Notion no aceptó un vídeo o una imagen; se ha guardado como enlace."]];
+  let last;
+  for (const [l, b, warn] of plans) {
+    try { const r = await attempt(l, b); if (warn) warnings.push(warn); return r; }
+    catch (e) { if (e.status !== 400) throw e; last = e; }
+  }
+  throw last;
+}
+
+function prepare(data) {
+  if (!data.title?.trim()) throw Error("El título es obligatorio.");
+  data.url = cleanUrl(data.url);
+  if (data.url.length > 2000) throw Error("El enlace supera el máximo de Notion.");
+}
+
+export async function saveClip(token, id, data, onProgress) {
+  id = normalizeId(id);
+  prepare(data);
+  onProgress?.("Comprobando la base de datos…");
+  const schema = await getSchema(token, id);
+  if (!data.allowDuplicate) { const dup = await checkDuplicate(token, id, data.url); if (dup.length) return {duplicate:dup}; }
+  const {uploads, warnings} = await prepareUploads(token, data, onProgress);
   const head = headerBlocks(data, uploads);
   const body = contentBlocks(data);
   const properties = makeProperties(data, schema, uploads.screenshotFile);
   onProgress?.("Creando el documento…");
   const parent = {type:"data_source_id", data_source_id:id};
-  let page;
-  try { page = await api(token, "/pages", "POST", {parent, properties, children:head}); }
-  catch (e) {
-    if (e.status !== 400 || !head.length) throw e;
-    page = await api(token, "/pages", "POST", {parent, properties, children:mediaAsLinks(head)});
-    warnings.push("Notion no aceptó un vídeo o una imagen; se ha guardado como enlace.");
-  }
+  const page = await withFallbacks((look, children) => api(token, "/pages", "POST", {parent, properties, children, ...look}), pageLook(data, uploads), head, warnings);
   try { await appendAll(token, page.id, body, onProgress); }
   catch (e) { return {page:{id:page.id, url:page.url}, partial:true, message:e.message, warnings}; }
   return {page:{id:page.id, url:page.url}, warnings};
+}
+
+// Combina las propiedades nuevas con las del documento existente: no borra nada que ya tuviera.
+// Las listas (Proyecto, Origen, Etiquetas) se suman; título, Tipo, Categoría y Estado solo se rellenan si estaban vacíos.
+export function mergeProperties(fresh, existing = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(fresh)) {
+    if (value.multi_select) {
+      const names = new Set((existing[key]?.multi_select || []).map((o) => o.name));
+      for (const o of value.multi_select) names.add(o.name);
+      out[key] = {multi_select:[...names].map((name) => ({name}))};
+    } else if (value.files) continue; // los adjuntos existentes se conservan; la captura va dentro de la página
+    else if (value.select && existing[key]?.select?.name) continue; // Tipo/Categoría ya elegidos se respetan
+    else if (value.status && existing[key]?.status?.name) continue;
+    else if (value.title && (existing[key]?.title || []).some((t) => (t.plain_text || t.text?.content || "").trim())) continue;
+    else out[key] = value;
+  }
+  return out;
+}
+
+// Actualiza un documento ya guardado: propiedades, icono y cabecera, y añade el contenido nuevo
+// al final bajo «Actualización · fecha», sin borrar lo que ya tenía (ni tus notas en Notion).
+export async function updateClip(token, id, pageId, data, onProgress) {
+  id = normalizeId(id);
+  prepare(data);
+  onProgress?.("Leyendo el documento existente…");
+  const schema = await getSchema(token, id);
+  const current = await api(token, "/pages/" + pageId);
+  if (current.in_trash || current.archived) throw Error("Ese documento está en la papelera de Notion.");
+  const {uploads, warnings} = await prepareUploads(token, data, onProgress, {screenshotAsFile:false});
+  const properties = mergeProperties(makeProperties(data, schema), current.properties);
+  onProgress?.("Actualizando propiedades…");
+  await withFallbacks((look) => api(token, "/pages/" + pageId, "PATCH", {properties, ...look}), pageLook(data, uploads), [], warnings);
+  const stamp = new Date().toLocaleString("es-ES", {day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit"});
+  const extra = [...headerBlocks({...data, url:""}, uploads), ...contentBlocks(data)];
+  const blocks = extra.length ? [block("divider", {}), heading("Actualización · " + stamp), ...extra] : [];
+  try { await appendAll(token, pageId, blocks, onProgress); }
+  catch (e) { return {page:{id:pageId, url:current.url}, partial:true, updated:true, message:e.message, warnings}; }
+  return {page:{id:pageId, url:current.url}, updated:true, warnings};
 }

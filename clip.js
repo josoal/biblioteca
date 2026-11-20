@@ -1,6 +1,7 @@
-import {readConfig,getSchema,saveClip,checkDuplicate,FIELD,cleanUrl,detectMedia,pickOption,richBlocks} from "./notion.js";
+import {readConfig,getSchema,saveClip,updateClip,checkDuplicate,FIELD,cleanUrl,detectMedia,pickOption,richBlocks} from "./notion.js";
 const $ = (id) => document.getElementById(id);
-let source = {}, config = {}, schema = {}, screenshot = null, override = false, contentEdited = false, known = [], dupTimer = 0, dupSeq = 0;
+let source = {}, config = {}, schema = {}, screenshot = null, override = false, contentEdited = false;
+let known = [], updateTarget = null, dupTimer = 0, dupSeq = 0, existingTags = [], tags = [];
 
 const status = (s, kind = "") => { $("message").textContent = s; $("message").className = "status " + kind; };
 const options = (id, list, value) => { $(id).replaceChildren(); for (const v of list) $(id).add(new Option(v || "Sin asignar", v)); $(id).value = value || ""; };
@@ -17,6 +18,39 @@ const opts = (key, type) => (schema[key]?.[type]?.options || []).map((x) => x.na
 const mode = () => document.querySelector('input[name="mode"]:checked').value;
 function setMode(v) { const el = document.querySelector(`input[name="mode"][value="${v}"]`); if (el) el.checked = true; updateContent(); }
 const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString("es-ES", {day:"numeric", month:"short", year:"numeric"}); } catch { return ""; } };
+const fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const el = (tag, props = {}, ...children) => { const e = Object.assign(document.createElement(tag), props); e.append(...children); return e; };
+
+// ---------- Etiquetas: existentes o nuevas (Notion crea las nuevas al guardar) ----------
+function renderTags() {
+  const box = $("tagChips"); box.replaceChildren();
+  for (const t of tags) {
+    const isNew = !existingTags.some((x) => fold(x) === fold(t));
+    const remove = el("button", {type:"button", className:"chip-x", title:"Quitar", textContent:"×"});
+    remove.addEventListener("click", () => { tags = tags.filter((x) => x !== t); renderTags(); });
+    box.append(el("span", {className:"tag" + (isNew ? " new" : "")}, t, ...(isNew ? [el("small", {textContent:"nueva"})] : []), remove));
+  }
+}
+function addTag(raw) {
+  for (let name of String(raw).split(",")) {
+    name = name.trim().replace(/\s+/g, " ").slice(0, 100);
+    if (!name) continue;
+    const existing = existingTags.find((x) => fold(x) === fold(name));
+    if (existing) name = existing; // respeta la forma ya usada en Notion
+    if (!tags.some((x) => fold(x) === fold(name))) tags.push(name);
+  }
+  renderTags();
+}
+$("tags").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag($("tags").value); $("tags").value = ""; }
+  else if (e.key === "Backspace" && !$("tags").value && tags.length) { tags.pop(); renderTags(); }
+});
+$("tags").addEventListener("input", () => {
+  // Al elegir una sugerencia de la lista, se añade directamente.
+  const v = $("tags").value;
+  if (v.includes(",") || existingTags.includes(v)) { addTag(v); $("tags").value = ""; }
+});
+$("tags").addEventListener("blur", () => { if ($("tags").value.trim()) { addTag($("tags").value); $("tags").value = ""; } });
 
 // ---------- Contenido ----------
 function summarize(blocks) {
@@ -25,8 +59,7 @@ function summarize(blocks) {
     if (b.t === "img") n.imágenes++; else if (b.t === "table") n.tablas++; else if (b.t === "embed" || b.t === "video") n.vídeos++;
     else if (/^h\d$/.test(b.t)) n.títulos++; else if (b.t === "code") n.código++; else n.texto++;
   }
-  const parts = [[n.texto, "bloques de texto"], [n.títulos, "títulos"], [n.imágenes, "imágenes"], [n.tablas, "tablas"], [n.vídeos, "vídeos"], [n.código, "bloques de código"]].filter(([v]) => v).map(([v, l]) => v + " " + l);
-  return parts.join(" · ");
+  return [[n.texto, "bloques de texto"], [n.títulos, "títulos"], [n.imágenes, "imágenes"], [n.tablas, "tablas"], [n.vídeos, "vídeos"], [n.código, "bloques de código"]].filter(([v]) => v).map(([v, l]) => v + " " + l).join(" · ");
 }
 function updateContent() {
   const m = mode();
@@ -40,25 +73,36 @@ function updateContent() {
 }
 function updateCount() { $("count").textContent = $("content").value.length.toLocaleString("es-ES") + " caracteres"; }
 
-// ---------- ¿Ya está guardada? ----------
+// ---------- ¿Ya está guardada? ¿Guardar otra vez o actualizar? ----------
+function saveLabel() {
+  $("save").textContent = updateTarget ? "Actualizar el documento existente" : known.length ? "Guardar como documento nuevo" : "Guardar en Notion";
+  $("save").classList.toggle("update", !!updateTarget);
+}
+function chooseUpdate(doc) {
+  updateTarget = doc;
+  for (const row of $("already").querySelectorAll(".dup-row")) row.classList.toggle("selected", row.dataset.id === doc?.id);
+  for (const b of $("already").querySelectorAll(".dup-row button")) b.textContent = b.closest(".dup-row").dataset.id === doc?.id ? "✓ Se actualizará" : "Actualizar este";
+  saveLabel();
+}
 function showKnown(list, checking = false, error = "") {
   const box = $("already");
   box.replaceChildren(); box.hidden = false;
   known = list || [];
-  if (checking) { box.className = "banner checking"; box.textContent = "Comprobando si ya está en tu Biblioteca…"; return; }
-  if (error) { box.className = "banner neutral"; box.textContent = "No se ha podido comprobar si ya estaba guardada. " + error; return; }
-  if (!known.length) { box.className = "banner fresh"; box.textContent = "✓ Nueva: todavía no está en tu Biblioteca."; $("save").textContent = "Guardar en Notion"; return; }
+  if (!known.some((d) => d.id === updateTarget?.id)) updateTarget = null;
+  if (checking) { box.className = "banner checking"; box.textContent = "Comprobando si ya está en tu Biblioteca…"; saveLabel(); return; }
+  if (error) { box.className = "banner neutral"; box.textContent = "No se ha podido comprobar si ya estaba guardada. " + error; saveLabel(); return; }
+  if (!known.length) { box.className = "banner fresh"; box.textContent = "✓ Nueva: todavía no está en tu Biblioteca."; saveLabel(); return; }
   box.className = "banner saved";
-  const strong = document.createElement("strong");
-  strong.textContent = known.length === 1 ? "★ Ya está guardada en tu Biblioteca" : `★ Ya está guardada ${known.length} veces en tu Biblioteca`;
-  box.append(strong);
+  box.append(el("strong", {textContent:known.length === 1 ? "★ Ya está guardada en tu Biblioteca" : `★ Ya está guardada ${known.length} veces en tu Biblioteca`}));
   for (const d of known) {
-    const a = document.createElement("a");
-    a.href = d.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-    a.textContent = d.title + (d.created ? " · " + fmtDate(d.created) : "") + " ↗";
-    box.append(a);
+    const a = el("a", {href:d.url, target:"_blank", rel:"noopener noreferrer", textContent:d.title + (d.created ? " · " + fmtDate(d.created) : "") + " ↗"});
+    const b = el("button", {type:"button", textContent:"Actualizar este"});
+    b.addEventListener("click", () => chooseUpdate(updateTarget?.id === d.id ? null : d));
+    const row = el("div", {className:"dup-row"}, a, b); row.dataset.id = d.id;
+    box.append(row);
   }
-  $("save").textContent = "Guardar otra vez";
+  box.append(el("small", {className:"hint", textContent:"Actualizar añade lo nuevo al final del documento y completa sus propiedades, sin borrar nada."}));
+  chooseUpdate(updateTarget);
 }
 async function checkKnown(url) {
   const seq = ++dupSeq;
@@ -69,21 +113,28 @@ async function checkKnown(url) {
   catch (e) { if (seq === dupSeq) showKnown([], false, e.message); }
 }
 
-// ---------- Medios ----------
+// ---------- Medios, icono y cabecera ----------
+const samePage = () => { try { return cleanUrl(source.url) === cleanUrl($("url").value); } catch { return false; } };
 function currentMedia() {
   let url = "";
   try { url = cleanUrl($("url").value); } catch { return null; }
-  const sameAsPage = (() => { try { return cleanUrl(source.url) === url; } catch { return false; } })();
-  return detectMedia(url, sameAsPage ? source.meta || {} : {});
+  return detectMedia(url, samePage() ? source.meta || {} : {});
 }
 function updateMedia() {
   const media = currentMedia(), box = $("media");
   box.hidden = !media;
-  if (!media) return;
-  box.textContent = media.kind === "youtube" ? "🎬 Se insertará el vídeo de YouTube en el documento."
+  if (media) box.textContent = media.kind === "youtube" ? "🎬 Se insertará el vídeo de YouTube en el documento."
     : media.kind === "video" ? "🎬 Se insertará el vídeo en el documento."
     : media.image ? "🖼️ Se guardará la imagen de la publicación de Instagram." : "🖼️ Instagram: abre la publicación para poder guardar su imagen.";
+  // Vista previa del icono y la cabecera que tendrá la página en Notion.
+  const icon = samePage() ? source.meta?.icon : "", cover = samePage() ? source.meta?.image : "";
+  $("look").hidden = !icon && !cover;
+  $("lookIcon").hidden = !icon; if (icon) $("lookIcon").src = icon;
+  $("lookCover").hidden = !cover; if (cover) $("lookCover").src = cover;
+  $("lookText").textContent = icon && cover ? "Icono y cabecera de la página en Notion" : icon ? "Icono de la página en Notion" : "Cabecera de la página en Notion";
 }
+$("lookIcon").addEventListener("error", () => { $("lookIcon").hidden = true; });
+$("lookCover").addEventListener("error", () => { $("lookCover").hidden = true; });
 
 // ---------- Carga ----------
 async function loadSource() {
@@ -104,7 +155,7 @@ async function loadSource() {
 function openSettings() { chrome.runtime.openOptionsPage(); }
 $("settings").addEventListener("click", openSettings);
 $("configure").addEventListener("click", openSettings);
-document.querySelectorAll('input[name="mode"]').forEach((el) => el.addEventListener("change", updateContent));
+document.querySelectorAll('input[name="mode"]').forEach((x) => x.addEventListener("change", updateContent));
 $("content").addEventListener("input", () => { contentEdited = true; updateCount(); });
 $("capture").addEventListener("click", async () => {
   $("capture").disabled = true;
@@ -117,44 +168,50 @@ $("capture").addEventListener("click", async () => {
 });
 $("remove").addEventListener("click", () => { screenshot = null; $("screenshotPreview").removeAttribute("src"); $("screenshotPreview").hidden = true; $("remove").hidden = true; });
 $("url").addEventListener("input", () => {
-  override = false; known = []; $("save").textContent = "Guardar en Notion"; $("duplicate").hidden = true; updateMedia();
+  override = false; known = []; updateTarget = null; saveLabel(); $("duplicate").hidden = true; updateMedia();
   clearTimeout(dupTimer); dupTimer = setTimeout(() => checkKnown($("url").value), 700);
 });
 
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if ($("tags").value.trim()) { addTag($("tags").value); $("tags").value = ""; }
   const save = $("save"); save.disabled = true; status("Guardando…"); $("openPage").hidden = true;
   try {
-    const tags = $("tags").value.split(",").map((x) => x.trim()).filter(Boolean);
-    const url = cleanUrl($("url").value);
-    const sameAsPage = (() => { try { return cleanUrl(source.url) === url; } catch { return false; } })();
-    const m = mode();
+    const url = cleanUrl($("url").value), same = samePage(), m = mode();
     const data = {
       title:$("title").value, url, mode:m, content:$("content").value, contentEdited,
-      selectionBlocks:sameAsPage ? source.selectionBlocks : [], pageBlocks:sameAsPage ? source.blocks : [],
-      media:currentMedia(), description:sameAsPage ? source.meta?.description || "" : "",
+      selectionBlocks:same ? source.selectionBlocks : [], pageBlocks:same ? source.blocks : [],
+      media:currentMedia(), description:same ? source.meta?.description || "" : "",
+      icon:same ? source.meta?.icon || "" : "", cover:same ? source.meta?.image || "" : "", useLook:$("useLook").checked,
       notes:$("notes").value, type:$("type").value, category:$("category").value, status:$("status").value,
-      project:chosen("project"), origin:chosen("origin"), tags, screenshot,
-      // Si el aviso de arriba ya mostraba que estaba guardada, pulsar «Guardar otra vez» es intencionado.
+      project:chosen("project"), origin:chosen("origin"), tags:[...tags], screenshot,
+      // Si el aviso de arriba ya mostraba que estaba guardada, «Guardar como documento nuevo» es intencionado.
       allowDuplicate:override || known.length > 0
     };
     if (m !== "link" && !data.content.trim() && !(data.pageBlocks?.length || data.selectionBlocks?.length)) throw Error("No hay texto para guardar. Selecciona texto o cambia a Enlace.");
-    const result = await saveClip(config.token, config.sourceId, data, (s) => status(s));
+    const progress = (s) => status(s);
+    const result = updateTarget ? await updateClip(config.token, config.sourceId, updateTarget.id, data, progress) : await saveClip(config.token, config.sourceId, data, progress);
     if (result.duplicate) {
       const box = $("duplicate"); box.replaceChildren();
-      const p = document.createElement("p"); p.textContent = "Ya hay un registro con esta dirección. Puedes abrirlo o guardar otro intencionadamente."; box.append(p);
-      for (const d of result.duplicate) { const a = document.createElement("a"); a.href = d.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = d.title; box.append(a); }
-      const b = document.createElement("button"); b.type = "button"; b.textContent = "Guardar de todos modos";
-      b.addEventListener("click", () => { override = true; box.hidden = true; $("form").requestSubmit(); });
-      box.append(b); box.hidden = false; showKnown(result.duplicate);
+      box.append(el("p", {textContent:"Ya hay un registro con esta dirección. Puedes actualizarlo o guardar otro intencionadamente."}));
+      for (const d of result.duplicate) box.append(el("a", {href:d.url, target:"_blank", rel:"noopener noreferrer", textContent:d.title}));
+      const upd = el("button", {type:"button", textContent:"Actualizar el existente"});
+      upd.addEventListener("click", () => { box.hidden = true; chooseUpdate(result.duplicate[0]); $("form").requestSubmit(); });
+      const again = el("button", {type:"button", textContent:"Guardar otro nuevo"});
+      again.addEventListener("click", () => { override = true; box.hidden = true; $("form").requestSubmit(); });
+      box.append(el("div", {className:"actions"}, upd, again)); box.hidden = false; showKnown(result.duplicate);
       status("No se ha creado ningún duplicado.", "error"); return;
     }
     $("duplicate").hidden = true; $("openPage").href = result.page.url; $("openPage").hidden = false; save.hidden = true;
     const extra = result.warnings?.length ? "\n" + result.warnings.join("\n") : "";
-    if (result.partial) status("Documento creado, pero no se pudo añadir todo el contenido. Abre el documento para comprobarlo. " + result.message + extra, "error");
-    else status("¡Documento guardado correctamente!" + extra, "good");
-    showKnown([{title:$("title").value, url:result.page.url, created:new Date().toISOString()}, ...known]);
-    $("already").firstChild.textContent = "★ Guardada en tu Biblioteca";
+    const done = result.updated ? "¡Documento actualizado!" : "¡Documento guardado correctamente!";
+    if (result.partial) status((result.updated ? "Documento actualizado" : "Documento creado") + ", pero no se pudo añadir todo el contenido. Abre el documento para comprobarlo. " + result.message + extra, "error");
+    else status(done + extra, "good");
+    const list = result.updated ? known : [{id:result.page.id, title:$("title").value, url:result.page.url, created:new Date().toISOString()}, ...known];
+    updateTarget = null; showKnown(list);
+    $("already").querySelectorAll(".dup-row button, .hint").forEach((x) => x.remove());
+    $("already").firstChild.textContent = result.updated ? "★ Actualizada en tu Biblioteca" : "★ Guardada en tu Biblioteca";
+    existingTags = [...new Set([...existingTags, ...tags])]; renderTags();
   } catch (e) { status(e.message, "error"); } finally { save.disabled = false; }
 });
 
@@ -185,7 +242,8 @@ async function init() {
     const origins = opts(FIELD.origin, "multi_select");
     const origin = media?.kind === "youtube" ? pickOption(origins, "YouTube", "Web") : media?.kind === "instagram" ? pickOption(origins, "Instagram", "Web") : pickOption(origins, "Web");
     checks("origin", origins, origin ? [origin] : []);
-    for (const tag of opts(FIELD.tags, "multi_select")) $("tagOptions").append(new Option(tag, tag));
+    existingTags = opts(FIELD.tags, "multi_select");
+    for (const tag of existingTags) $("tagOptions").append(new Option(tag, tag));
     setMode(initial);
     updateMedia();
     $("connection").textContent = "Conectado a Notion";

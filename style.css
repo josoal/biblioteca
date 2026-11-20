@@ -12,3 +12,22 @@ header img{flex:none;border-radius:6px}
 @media(prefers-color-scheme:dark){.banner.fresh{color:#7fd6a2}}
 .media-hint{margin:-4px 0 11px;font-size:12px;color:var(--muted)}
 #summary{display:block;margin-bottom:5px}
+.dup-row{display:flex;align-items:center;gap:8px;margin-top:5px;padding:3px 4px;border-radius:6px}
+.dup-row a{flex:1;min-width:0;margin:0}
+.dup-row button{flex:none;padding:4px 8px;font-size:11px}
+.dup-row.selected{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.dup-row.selected button{border-color:var(--accent);color:var(--accent);font-weight:600}
+.banner .hint{display:block;margin-top:6px}
+.primary.update{background:#b7791f;border-color:#b7791f}
+.tagbox{display:flex;flex-wrap:wrap;gap:5px;align-items:center;border:1px solid var(--line);border-radius:7px;padding:5px;background:var(--panel)}
+.tagbox:focus-within{border-color:var(--accent)}
+.tagbox input{flex:1;min-width:140px;border:0;padding:3px;box-shadow:none!important}
+#tagChips{display:contents}
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;border-radius:12px;padding:2px 4px 2px 8px;background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
+.tag.new{background:color-mix(in srgb,#2e7d4f 15%,var(--panel))}
+.tag small{font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:#2e7d4f}
+.chip-x{border:0;background:none;padding:0 4px;font-size:13px;line-height:1;color:var(--muted)}
+.look{display:flex;align-items:center;gap:8px;margin:-2px 0 11px;font-size:12px;color:var(--muted)}
+.look input{width:auto;margin:0}
+.look-icon{width:22px;height:22px;object-fit:contain;border-radius:4px}
+.look-cover{width:72px;height:30px;object-fit:cover;border-radius:4px;border:1px solid var(--line)}

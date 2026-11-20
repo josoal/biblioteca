@@ -7,6 +7,7 @@
 <label class="field"><span>Título</span><input id="title" required maxlength="1000"></label>
 <label class="field"><span>Fuente original</span><input id="url" type="url" required maxlength="2000"></label>
 <div id="media" class="media-hint" hidden></div>
+<label id="look" class="look" hidden><input type="checkbox" id="useLook" checked><img id="lookIcon" class="look-icon" alt="Icono de la web" hidden><img id="lookCover" class="look-cover" alt="Imagen principal" hidden><span id="lookText"></span></label>
 <div class="field"><span>Qué guardar</span><div class="modes">
 <label><input type="radio" name="mode" value="link" checked> Enlace</label>
 <label><input type="radio" name="mode" value="selection"> Selección</label>
@@ -15,7 +16,8 @@
 <div class="grid"><label class="field"><span>Tipo</span><select id="type"></select></label><label class="field"><span>Categoría</span><select id="category"></select></label></div>
 <div class="field"><span>Proyecto</span><div class="chips" id="project"></div></div>
 <div class="field"><span>Origen</span><div class="chips" id="origin"></div></div>
-<div class="grid"><label class="field"><span>Etiquetas</span><input id="tags" placeholder="Separadas por comas" list="tagOptions"><datalist id="tagOptions"></datalist></label><label class="field"><span>Estado</span><select id="status"></select></label></div>
+<div class="field"><label for="tags" style="display:block;font-weight:600;font-size:12px;margin-bottom:5px">Etiquetas</label><div class="tagbox"><span id="tagChips"></span><input id="tags" placeholder="Escribe y pulsa Intro (se crean si no existen)" list="tagOptions" autocomplete="off"></div><datalist id="tagOptions"></datalist></div>
+<div class="grid"><label class="field"><span>Estado</span><select id="status"></select></label></div>
 <label class="field"><span>Anotaciones</span><textarea id="notes" rows="3" placeholder="Añade un comentario o una nota…"></textarea></label>
 <div class="actions"><button type="button" id="capture">📷 Capturar pantalla</button><button type="button" id="remove" hidden>Quitar captura</button></div><img id="screenshotPreview" alt="Vista previa de la captura" hidden>
 <div id="duplicate" hidden></div>
