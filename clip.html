@@ -1,15 +1,17 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Guardar en Biblioteca</title><link rel="stylesheet" href="style.css"></head>
 <body class="clipper"><main>
-<header><span aria-hidden="true" style="font-size:22px">📚</span><div style="flex:1"><h1>Biblioteca de conocimiento</h1><small id="connection">Conectando a Notion…</small></div><button id="settings" type="button" title="Configuración">⚙</button></header>
-<div id="unconfigured" class="section" hidden><strong>Configura la conexión una sola vez</strong><p class="hint">Necesitas una integración de Notion con acceso a la base maestra.</p><button id="configure" type="button">Conectar Notion</button></div>
+<header><img src="icons/icon48.png" alt="" width="28" height="28"><div style="flex:1"><h1>Biblioteca</h1><small id="connection">Conectando a Notion…</small></div><button id="settings" type="button" title="Configuración" aria-label="Configuración">⚙</button></header>
+<div id="already" class="banner" role="status" hidden></div>
+<div id="unconfigured" class="section" hidden><strong>Configura la conexión una sola vez</strong><p class="hint">Necesitas una integración de Notion con acceso a «Biblioteca DB».</p><button id="configure" type="button">Conectar Notion</button></div>
 <form id="form" hidden>
 <label class="field"><span>Título</span><input id="title" required maxlength="1000"></label>
 <label class="field"><span>Fuente original</span><input id="url" type="url" required maxlength="2000"></label>
+<div id="media" class="media-hint" hidden></div>
 <div class="field"><span>Qué guardar</span><div class="modes">
 <label><input type="radio" name="mode" value="link" checked> Enlace</label>
 <label><input type="radio" name="mode" value="selection"> Selección</label>
-<label><input type="radio" name="mode" value="article"> Página (texto)</label></div></div>
-<label id="contentField" class="field" hidden><span>Contenido capturado</span><textarea id="content" rows="5"></textarea><small id="count" class="hint"></small></label>
+<label><input type="radio" name="mode" value="article"> Página completa</label></div></div>
+<div id="contentField" class="field" hidden><span>Contenido capturado</span><small id="summary" class="hint"></small><textarea id="content" rows="5" aria-label="Contenido capturado"></textarea><small id="count" class="hint"></small></div>
 <div class="grid"><label class="field"><span>Tipo</span><select id="type"></select></label><label class="field"><span>Categoría</span><select id="category"></select></label></div>
 <div class="field"><span>Proyecto</span><div class="chips" id="project"></div></div>
 <div class="field"><span>Origen</span><div class="chips" id="origin"></div></div>
